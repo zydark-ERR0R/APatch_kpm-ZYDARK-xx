@@ -15,7 +15,7 @@
 #include <uapi/asm-generic/errno.h>
 
 KPM_NAME("xanwar_rw");
-KPM_VERSION("1.4.0");
+KPM_VERSION("1.4.1");
 KPM_LICENSE("GPL v2");
 KPM_AUTHOR("XAnouar");
 KPM_DESCRIPTION("Cross-process memory r/w via prctl hook (safe)");
@@ -139,8 +139,8 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
     logkm("using prctl fp = 0x%lx\n", prctl_fp);
     g_prctl_fp = prctl_fp;
 
-    // ⚠️ hook_wrap بدل fp_hook_wrap4
-    hook_err_t err = hook_wrap(prctl_fp, 5, (void*)before_prctl, NULL, NULL);
+    // ⚠️ hook_wrap مع تحويل (void*)
+    hook_err_t err = hook_wrap((void*)prctl_fp, 5, (void*)before_prctl, NULL, NULL);
     if (err != HOOK_NO_ERR) {
         logkm("ERROR: hook_wrap failed: %d\n", err);
         return -EINVAL;
@@ -153,7 +153,7 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
 static long xanwar_rw_exit(void* __user reserved) {
     logkm("exit: unhooking prctl\n");
     if (g_prctl_fp) {
-        hook_unwrap(g_prctl_fp, (void*)before_prctl, NULL);
+        hook_unwrap((void*)g_prctl_fp, (void*)before_prctl, NULL);
     }
     logkm("xanwar_rw unloaded\n");
     return 0;
