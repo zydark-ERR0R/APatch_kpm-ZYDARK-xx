@@ -19,7 +19,6 @@
 KPM_NAME("xanwar_rw");
 KPM_VERSION("1.2.0");
 KPM_LICENSE("GPL v2");
-KPM_AUTHOR("XAnouar");
 KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
 
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
