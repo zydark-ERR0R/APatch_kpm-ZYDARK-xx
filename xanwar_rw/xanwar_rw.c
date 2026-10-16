@@ -14,27 +14,22 @@
 #include <asm/ptrace.h>
 #include <uapi/asm-generic/errno.h>
 
-// ⚠️ لا نستخدم kpm_utils.h لتجنب kallsyms_lookup_name_by_suffix
-// #include "../kpm_utils.h"
-
 KPM_NAME("xanwar_rw");
-KPM_VERSION("1.3.0");
+KPM_VERSION("1.4.0");
 KPM_LICENSE("GPL v2");
 KPM_AUTHOR("XAnouar");
-KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
+KPM_DESCRIPTION("Cross-process memory r/w via prctl hook (safe)");
 
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
 
-// ======================== Kernel symbols ========================
-// نعرّف مؤشرات الدوال بأنفسنا بدلاً من kfunc_def
 static struct task_struct* (*my_find_task_by_vpid)(pid_t nr) = NULL;
 static int (*my_access_process_vm)(struct task_struct* task, unsigned long addr,
                                     void* buf, int len, unsigned int gup_flags) = NULL;
 
 static uintptr_t g_prctl_fp = 0;
 
-// ======================== prctl hook ========================
-static void before_prctl(hook_fargs4_t *fargs, void *udata) {
+// ⚠️ hook_fargs5_t لأن prctl له 5 معاملات
+static void before_prctl(hook_fargs5_t *fargs, void *udata) {
     struct pt_regs *regs = (struct pt_regs *)fargs->arg0;
     if (!regs) return;
 
@@ -102,11 +97,9 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
     fargs->skip_origin = 1;
 }
 
-// ======================== Init / Exit ========================
 static long xanwar_rw_init(const char* args, const char* event, void* __user reserved) {
     logkm("init: event=%s\n", event ? event : "?");
 
-    // البحث المباشر عن الرموز بدلاً من kfunc_def
     my_find_task_by_vpid = (void*)kallsyms_lookup_name("find_task_by_vpid");
     my_access_process_vm = (void*)kallsyms_lookup_name("access_process_vm");
 
@@ -118,7 +111,6 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
         return -ENOENT;
     }
 
-    // ابحث عن sys_call_table
     uintptr_t sys_call_table = (uintptr_t)kallsyms_lookup_name("sys_call_table");
     logkm("sys_call_table = 0x%lx\n", sys_call_table);
 
@@ -147,9 +139,10 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
     logkm("using prctl fp = 0x%lx\n", prctl_fp);
     g_prctl_fp = prctl_fp;
 
-    hook_err_t err = fp_hook_wrap4(prctl_fp, (hook_chain4_callback)before_prctl, NULL, NULL);
+    // ⚠️ hook_wrap بدل fp_hook_wrap4
+    hook_err_t err = hook_wrap(prctl_fp, 5, (void*)before_prctl, NULL, NULL);
     if (err != HOOK_NO_ERR) {
-        logkm("ERROR: fp_hook_wrap4 failed: %d\n", err);
+        logkm("ERROR: hook_wrap failed: %d\n", err);
         return -EINVAL;
     }
 
@@ -160,7 +153,7 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
 static long xanwar_rw_exit(void* __user reserved) {
     logkm("exit: unhooking prctl\n");
     if (g_prctl_fp) {
-        fp_hook_unwrap(g_prctl_fp, (void*)before_prctl, NULL);
+        hook_unwrap(g_prctl_fp, (void*)before_prctl, NULL);
     }
     logkm("xanwar_rw unloaded\n");
     return 0;
