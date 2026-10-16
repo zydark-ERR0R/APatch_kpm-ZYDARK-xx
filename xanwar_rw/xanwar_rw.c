@@ -25,8 +25,10 @@ KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
 
 // ======================== Kernel symbols ========================
-// ⚠️ يجب أن تكون الأسماء kf_<name> بالضبط
-static struct task_struct* (*kf_find_task_by_vpid)(pid_t nr) = NULL;
+// ⚠️ kf_find_task_by_vpid موجود مسبقاً في KernelPatch (linux/sched.h)
+// لا تعرّفه مرة أخرى!
+
+// access_process_vm غير معرّف في KernelPatch، لذا نعرّفه يدوياً
 static int (*kf_access_process_vm)(struct task_struct* task, unsigned long addr,
                                     void* buf, int len, unsigned int gup_flags) = NULL;
 
@@ -96,11 +98,13 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
 static long xanwar_rw_init(const char* args, const char* event, void* __user reserved) {
     logkm("init: event=%s\n", event ? event : "?");
 
-    kfunc_lookup_name(find_task_by_vpid);
+    // find_task_by_vpid معرّف مسبقاً، لا نبحث عنه
+    // نبحث فقط عن access_process_vm
     kfunc_lookup_name(access_process_vm);
 
     if (!kf_find_task_by_vpid || !kf_access_process_vm) {
-        logkm("ERROR: required symbols not found\n");
+        logkm("ERROR: required symbols not found (find_task=%p, apv=%p)\n",
+              kf_find_task_by_vpid, kf_access_process_vm);
         return -ENOENT;
     }
 
