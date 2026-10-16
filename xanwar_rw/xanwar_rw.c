@@ -19,6 +19,7 @@
 KPM_NAME("xanwar_rw");
 KPM_VERSION("1.2.0");
 KPM_LICENSE("GPL v2");
+KPM_AUTHOR("XAnouar");
 KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
 
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
@@ -103,24 +104,17 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
     }
     logkm("access_process_vm = %p\n", kf_access_process_vm);
 
-    // ======================================================
-    // الطريقة 1: ابحث عن sys_call_table عبر kallsyms
-    // ======================================================
     uintptr_t sys_call_table = (uintptr_t)kallsyms_lookup_name("sys_call_table");
     logkm("sys_call_table = 0x%lx\n", sys_call_table);
 
     uintptr_t prctl_fp = 0;
 
     if (sys_call_table) {
-        // __NR_prctl = 167 على arm64
         #define __NR_PRCTL_ARM64 167
         prctl_fp = ((uintptr_t*)sys_call_table)[__NR_PRCTL_ARM64];
         logkm("prctl from sys_call_table = 0x%lx\n", prctl_fp);
     }
 
-    // ======================================================
-    // الطريقة 2: إذا فشلت، ابحث عن الأسماء مباشرة
-    // ======================================================
     if (!prctl_fp) {
         const char* names[] = { "SyS_prctl", "sys_prctl" };
         for (int i = 0; i < 2; i++) {
