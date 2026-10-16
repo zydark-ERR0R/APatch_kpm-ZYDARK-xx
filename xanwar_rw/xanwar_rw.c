@@ -25,9 +25,10 @@ KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
 
 // ======================== Kernel symbols ========================
-static struct task_struct* (*kfunc_find_task_by_vpid)(pid_t nr) = NULL;
-static int (*kfunc_access_process_vm)(struct task_struct* task, unsigned long addr,
-                                       void* buf, int len, unsigned int gup_flags) = NULL;
+// ⚠️ يجب أن تكون الأسماء kf_<name> بالضبط
+static struct task_struct* (*kf_find_task_by_vpid)(pid_t nr) = NULL;
+static int (*kf_access_process_vm)(struct task_struct* task, unsigned long addr,
+                                    void* buf, int len, unsigned int gup_flags) = NULL;
 
 // ======================== prctl hook ========================
 static void before_prctl(hook_fargs4_t *fargs, void *udata) {
@@ -58,7 +59,7 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
         return;
     }
 
-    struct task_struct* task = kfunc_find_task_by_vpid((pid_t)cmd->pid);
+    struct task_struct* task = kf_find_task_by_vpid((pid_t)cmd->pid);
     if (!task) {
         cmd->result = -1;
         regs->regs[0] = -1;
@@ -71,14 +72,14 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
 
     switch (cmd->op) {
         case NA_CMD_READ_MEM: {
-            int ret = kfunc_access_process_vm(task, (unsigned long)cmd->addr,
-                                              cmd->data, (int)sz, 0x10);
+            int ret = kf_access_process_vm(task, (unsigned long)cmd->addr,
+                                           cmd->data, (int)sz, 0x10);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
         }
         case NA_CMD_WRITE_MEM: {
-            int ret = kfunc_access_process_vm(task, (unsigned long)cmd->addr,
-                                              cmd->data, (int)sz, 0x10 | 0x01);
+            int ret = kf_access_process_vm(task, (unsigned long)cmd->addr,
+                                           cmd->data, (int)sz, 0x10 | 0x01);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
         }
@@ -98,7 +99,7 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
     kfunc_lookup_name(find_task_by_vpid);
     kfunc_lookup_name(access_process_vm);
 
-    if (!kfunc(find_task_by_vpid) || !kfunc(access_process_vm)) {
+    if (!kf_find_task_by_vpid || !kf_access_process_vm) {
         logkm("ERROR: required symbols not found\n");
         return -ENOENT;
     }
@@ -130,8 +131,6 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
 
 static long xanwar_rw_exit(void* __user reserved) {
     logkm("exit: unhooking prctl\n");
-    // fp_hook_unwrap needs the original function pointer
-    // (we don't store it, so we can't easily unwrap — acceptable for demo)
     logkm("xanwar_rw unloaded\n");
     return 0;
 }
