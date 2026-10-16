@@ -16,8 +16,6 @@
 #include <linux/mm.h>
 #include <linux/printk.h>
 #include <linux/string.h>
-#include <linux/uaccess.h>
-#include <linux/delay.h>
 #include <uapi/asm-generic/errno.h>
 
 #include "../kpm_utils.h"
@@ -30,10 +28,9 @@ KPM_DESCRIPTION("Cross-process memory read/write via prctl hook");
 
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
 
-// ======================== Kernel function lookups ========================
+// ======================== Kernel function pointers ========================
 // access_process_vm: reads/writes another process's memory
-// find_vpid: finds a pid struct by numeric PID
-// pid_task: gets task_struct from pid struct
+// find_task_by_vpid: finds task_struct by numeric PID
 static struct task_struct* (*kfunc_find_task_by_vpid)(pid_t nr) = NULL;
 static int (*kfunc_access_process_vm)(struct task_struct* task, unsigned long addr,
                                        void* buf, int len, unsigned int gup_flags) = NULL;
@@ -48,14 +45,11 @@ static int before_prctl(unsigned long option, unsigned long arg2,
 
     struct na_cmd* cmd = (struct na_cmd*)arg2;
     if (!cmd) {
-        return 1;  // consumed, but nothing to do
+        return 1;
     }
 
-    // Handle GET_PID command
+    // Handle GET_PID command (not implemented — user must pass pid)
     if (cmd->op == NA_CMD_GET_PID) {
-        // Find task by package name is not implemented here;
-        // user should pass pid directly in cmd->pid.
-        // For now, just return an error if pid is 0.
         if (cmd->pid == 0) {
             cmd->result = -1;
         } else {
@@ -70,7 +64,7 @@ static int before_prctl(unsigned long option, unsigned long arg2,
         return 1;
     }
 
-    struct task_struct* task = kfunc_find_task_by_vpid(cmd->pid);
+    struct task_struct* task = kfunc_find_task_by_vpid((pid_t)cmd->pid);
     if (!task || !task->mm) {
         cmd->result = -1;
         return 1;
@@ -78,23 +72,20 @@ static int before_prctl(unsigned long option, unsigned long arg2,
 
     switch (cmd->op) {
         case NA_CMD_READ_MEM: {
-            // Clamp size to our max
-            uint32_t sz = cmd->size;
+            unsigned int sz = cmd->size;
             if (sz > NA_MAX_RW_SIZE) sz = NA_MAX_RW_SIZE;
 
-            // access_process_vm with FOLL_FORCE to read even if not present
-            int ret = kfunc_access_process_vm(task, cmd->addr,
-                                              cmd->data, sz, FOLL_FORCE);
+            int ret = kfunc_access_process_vm(task, (unsigned long)cmd->addr,
+                                              cmd->data, (int)sz, FOLL_FORCE);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
         }
         case NA_CMD_WRITE_MEM: {
-            uint32_t sz = cmd->size;
+            unsigned int sz = cmd->size;
             if (sz > NA_MAX_RW_SIZE) sz = NA_MAX_RW_SIZE;
 
-            // FOLL_WRITE | FOLL_FORCE for writing
-            int ret = kfunc_access_process_vm(task, cmd->addr,
-                                              cmd->data, sz,
+            int ret = kfunc_access_process_vm(task, (unsigned long)cmd->addr,
+                                              cmd->data, (int)sz,
                                               FOLL_FORCE | FOLL_WRITE);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
@@ -104,14 +95,14 @@ static int before_prctl(unsigned long option, unsigned long arg2,
             break;
     }
 
-    return 1;  // consumed, do not pass to original prctl
+    return 1;  // consumed
 }
 
 // ======================== Init / Exit ========================
 static long xanwar_rw_init(const char* args, const char* event, void* __user reserved) {
     logkm("init: event=%s args=%s\n", event ? event : "?", args ? args : "?");
 
-    // Look up required kernel functions
+    // Look up required kernel functions using kallsyms_lookup_name
     kfunc_find_task_by_vpid = (void*)kallsyms_lookup_name("find_task_by_vpid");
     kfunc_access_process_vm = (void*)kallsyms_lookup_name("access_process_vm");
 
@@ -123,8 +114,6 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
     logkm("symbols resolved, installing prctl hook...\n");
 
     // Install prctl syscall hook
-    // fp_hook_syscalln(__NR_prctl, 5, hook_fn, arg1, arg2)
-    // This intercepts all prctl calls with 5 arguments.
     long ret = fp_hook_syscalln(__NR_prctl, 5, before_prctl, 0, 0);
     if (ret != 0) {
         logkm("ERROR: fp_hook_syscalln failed: %ld\n", ret);
@@ -138,7 +127,6 @@ static long xanwar_rw_init(const char* args, const char* event, void* __user res
 static long xanwar_rw_exit(void* __user reserved) {
     logkm("exit: unhooking prctl\n");
 
-    // Unhook our prctl hook
     fp_unhook_syscalln(__NR_prctl, 5, before_prctl);
 
     logkm("xanwar_rw unloaded\n");

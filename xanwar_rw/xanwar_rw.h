@@ -1,7 +1,8 @@
 #ifndef __XANWAR_RW_H
 #define __XANWAR_RW_H
 
-#include <linux/types.h>
+// لا تستخدم <linux/types.h> هنا لتجنب التعارض مع ktypes.h
+// استخدم الأنواع البدائية مباشرة
 
 // ============ يجب أن تطابق driver.h الخاص بك ============
 #define NA_PRCTL_MAGIC   0x4E41
@@ -12,15 +13,15 @@
 #define NA_MAX_PKG_NAME  256
 
 struct na_cmd {
-    uint32_t op;
-    uint32_t pid;
-    uint64_t addr;
-    uint32_t size;
-    int32_t  result;
-    int32_t  screen_w;
-    int32_t  screen_h;
-    char     pkg[NA_MAX_PKG_NAME];
-    uint8_t  data[NA_MAX_RW_SIZE];
+    unsigned int  op;       // uint32_t
+    unsigned int  pid;      // uint32_t
+    unsigned long addr;     // uint64_t
+    unsigned int  size;     // uint32_t
+    int           result;   // int32_t
+    int           screen_w; // int32_t
+    int           screen_h; // int32_t
+    char          pkg[NA_MAX_PKG_NAME];
+    unsigned char data[NA_MAX_RW_SIZE]; // uint8_t
 };
 // ========================================================
 
