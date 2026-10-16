@@ -14,10 +14,11 @@
 #include <asm/ptrace.h>
 #include <uapi/asm-generic/errno.h>
 
-#include "../kpm_utils.h"
+// ⚠️ لا نستخدم kpm_utils.h لتجنب kallsyms_lookup_name_by_suffix
+// #include "../kpm_utils.h"
 
 KPM_NAME("xanwar_rw");
-KPM_VERSION("1.2.0");
+KPM_VERSION("1.3.0");
 KPM_LICENSE("GPL v2");
 KPM_AUTHOR("XAnouar");
 KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
@@ -25,7 +26,9 @@ KPM_DESCRIPTION("Cross-process memory r/w via prctl hook");
 #define logkm(fmt, ...) printk("xanwar_rw: " fmt, ##__VA_ARGS__)
 
 // ======================== Kernel symbols ========================
-static int (*kf_access_process_vm)(struct task_struct* task, unsigned long addr,
+// نعرّف مؤشرات الدوال بأنفسنا بدلاً من kfunc_def
+static struct task_struct* (*my_find_task_by_vpid)(pid_t nr) = NULL;
+static int (*my_access_process_vm)(struct task_struct* task, unsigned long addr,
                                     void* buf, int len, unsigned int gup_flags) = NULL;
 
 static uintptr_t g_prctl_fp = 0;
@@ -59,7 +62,14 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
         return;
     }
 
-    struct task_struct* task = kf_find_task_by_vpid((pid_t)cmd->pid);
+    if (!my_find_task_by_vpid || !my_access_process_vm) {
+        cmd->result = -1;
+        regs->regs[0] = -1;
+        fargs->skip_origin = 1;
+        return;
+    }
+
+    struct task_struct* task = my_find_task_by_vpid((pid_t)cmd->pid);
     if (!task) {
         cmd->result = -1;
         regs->regs[0] = -1;
@@ -72,13 +82,13 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
 
     switch (cmd->op) {
         case NA_CMD_READ_MEM: {
-            int ret = kf_access_process_vm(task, (unsigned long)cmd->addr,
+            int ret = my_access_process_vm(task, (unsigned long)cmd->addr,
                                            cmd->data, (int)sz, 0x10);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
         }
         case NA_CMD_WRITE_MEM: {
-            int ret = kf_access_process_vm(task, (unsigned long)cmd->addr,
+            int ret = my_access_process_vm(task, (unsigned long)cmd->addr,
                                            cmd->data, (int)sz, 0x10 | 0x01);
             cmd->result = (ret == (int)sz) ? 0 : -1;
             break;
@@ -96,14 +106,19 @@ static void before_prctl(hook_fargs4_t *fargs, void *udata) {
 static long xanwar_rw_init(const char* args, const char* event, void* __user reserved) {
     logkm("init: event=%s\n", event ? event : "?");
 
-    kfunc_lookup_name(access_process_vm);
+    // البحث المباشر عن الرموز بدلاً من kfunc_def
+    my_find_task_by_vpid = (void*)kallsyms_lookup_name("find_task_by_vpid");
+    my_access_process_vm = (void*)kallsyms_lookup_name("access_process_vm");
 
-    if (!kf_access_process_vm) {
-        logkm("ERROR: access_process_vm not found\n");
+    logkm("find_task_by_vpid = %p\n", my_find_task_by_vpid);
+    logkm("access_process_vm = %p\n", my_access_process_vm);
+
+    if (!my_find_task_by_vpid || !my_access_process_vm) {
+        logkm("ERROR: required symbols not found\n");
         return -ENOENT;
     }
-    logkm("access_process_vm = %p\n", kf_access_process_vm);
 
+    // ابحث عن sys_call_table
     uintptr_t sys_call_table = (uintptr_t)kallsyms_lookup_name("sys_call_table");
     logkm("sys_call_table = 0x%lx\n", sys_call_table);
 
